@@ -1,5 +1,6 @@
 package com.jpmc.midascore.component;
 
+import com.jpmc.midascore.foundation.Incentive;
 import com.jpmc.midascore.foundation.Transaction;
 
 import jakarta.transaction.Transactional;
@@ -10,14 +11,17 @@ import com.jpmc.midascore.entity.TransactionRecord;
 
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
 
 @Component
 public class TransactionListener {
 
     private final DatabaseConduit databaseConduit;
+    private final RestTemplate restTemplate;
 
-    public TransactionListener(DatabaseConduit databaseConduit) {
+    public TransactionListener(DatabaseConduit databaseConduit, RestTemplate restTemplate) {
         this.databaseConduit = databaseConduit;
+        this.restTemplate = restTemplate;
     }
     
     @Transactional
@@ -38,8 +42,12 @@ public class TransactionListener {
         // If the sender doesn't have enough money then discard the transaction
         if (senderBalance < amount) return;
 
+        // Get the incentive
+        Incentive response = restTemplate.postForObject("http://localhost:8080/incentive", sender, Incentive.class);
+        float incentive = (response != null) ? response.getAmount() : 0.0f;
+
         // Update the recpient's and sender's balances
-        recipient.setBalance(recipientBalance + amount);
+        recipient.setBalance(recipientBalance + amount + incentive);
         sender.setBalance(senderBalance - amount);
 
         // Save the updated balances
@@ -47,7 +55,7 @@ public class TransactionListener {
         databaseConduit.save(sender);
 
         // Record and save the transaction
-        TransactionRecord record = new TransactionRecord(sender, recipient, amount);
+        TransactionRecord record = new TransactionRecord(sender, recipient, amount, incentive);
         databaseConduit.save(record);
     }
 }
